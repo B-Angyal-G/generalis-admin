@@ -1,6 +1,3 @@
-"""Nurse scheduling problem with shift requests."""
-from typing import Union
-
 from ortools.sat.python import cp_model
 from openpyxl import *
 
@@ -136,23 +133,6 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         print(f"\n--- Megoldás {self._solution_count} ---")
         current_schedule = []
 
-        # WORKED
-        # for d in range(self._num_days):
-        #     day_schedule = []
-        #     for a in self._all_admins:
-        #         admins_shifts_today = []
-        #         for s in self._all_shifts:
-        #             if self.Value(self._shifts[(a, d, s)]) == 1:
-        #                 if s == 0:
-        #                     admins_shifts_today.append('N')
-        #                 elif s == 1:
-        #                     admins_shifts_today.append('E')
-        #         if not admins_shifts_today:
-        #             admins_shifts_today.append('P')
-        #         day_schedule.append(f"Admin {a}: {', '.join(admins_shifts_today)}")
-        #     current_schedule.append(day_schedule)
-        #     print(f"Nap {d+1}: {', '.join(day_schedule)}")
-
         for a in self._all_admins:
             admins_shifts_today = [a]
             for d in range(self._num_days):
@@ -232,12 +212,13 @@ def main() -> None:
         row_list.append(column)
 
     # NAPOK SZAMA
-    DAYS = row_list[0][1]
+    num_days = row_list[0][1]
+    solution_limit = row_list[2][1]
 
     # BEOLVASOTT TABLAZAT
-    # DAYS + 6: OSZLOPOK SZAMA A KERESEK TABLAZAT ELOTT
+    # num_days + 6: OSZLOPOK SZAMA A KERESEK TABLAZAT ELOTT
     # row in row_list[4:len(row_list)]]-ban 4: TABLAZAT ELOTTI SOROK SZAMA
-    ORIG_TABLE = [row[0:DAYS + 6] for row in row_list[4:len(row_list)]]
+    ORIG_TABLE = [row[0:num_days + 6] for row in row_list[5:len(row_list)]]
 
     # ADMINOK
     admins_name = [row[0] for row in ORIG_TABLE]
@@ -255,9 +236,9 @@ def main() -> None:
     sun = []
     if SATURDAY == 7:
         sun.append(1)
-    while SATURDAY <= DAYS:
+    while SATURDAY <= num_days:
         sat.append(SATURDAY)
-        if SATURDAY != DAYS:
+        if SATURDAY != num_days:
             sun.append(SATURDAY + 1)
         SATURDAY += 7
 
@@ -290,7 +271,6 @@ def main() -> None:
     # The optimal assignment maximizes the number of fulfilled shift requests.
     num_admins = len(admins_name)
     num_shifts = 2
-    num_days = DAYS
     all_admins = range(num_admins)
     all_shifts = range(num_shifts)
     all_days = range(num_days)
@@ -337,11 +317,6 @@ def main() -> None:
             model.Add(shifts[(a, d + 3, 1)] == 0).OnlyEnforceIf([shifts[(a, d, 0)], shifts[(a, d + 1, 0)], shifts[(a, d + 2, 1)]])
 
     # Set day and night shift nums
-    ### OLD!!!
-    # for n in all_nurses:
-    #     model.Add(sum( [shifts[(n, d, 0)] for d in all_days] ) == day_shifts[n])
-    #     model.Add(sum( [shifts[(n, d, 1)] for d in all_days] ) == night_shifts[n])
-
     ### Soft constrains
     # Day and night shifts min, max and sum constrains
     for a in all_admins:
@@ -382,7 +357,6 @@ def main() -> None:
 
 
     solver = cp_model.CpSolver()
-    solution_limit = 5
     solution_printer = SolutionPrinter(shifts, all_admins, num_days, all_shifts, solution_limit)
 
     solver.parameters.enumerate_all_solutions = True

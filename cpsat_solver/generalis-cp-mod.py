@@ -42,72 +42,98 @@ def niceprint(final_table, DAYS, SWITCH):
             print()
 
 def request_check(ORIG_TABLE):
-    DAYS = len(ORIG_TABLE[0]) - 3
+    DAYS = len(ORIG_TABLE[0]) - 6
     ERROR = 0
 
     ### ### ELLENORZES, HOGY PONTOSAN ANNYI KIOSZTANDO MUSZAK VAN-E AHANY NAP
-    day_shift = 0
-    night_shift = 0
-    for i in range(len(ORIG_TABLE)):
-        day_shift += ORIG_TABLE[i][1]
-        night_shift += ORIG_TABLE[i][2]
+    sum_shifts = sum( row[5] for row in ORIG_TABLE )
+    
+    ### MAX, MIN NAPPALOS ES EJSZAKAS MUSZAKOK SZAMAINAK ELLENORZESE
+    sum_day_shift_min = sum( row[1] for row in ORIG_TABLE )
+    sum_day_shift_max = sum( row[2] for row in ORIG_TABLE )
+    sum_night_shift_min = sum( row[3] for row in ORIG_TABLE )
+    sum_night_shift_max = sum( row[4] for row in ORIG_TABLE )
 
-    ### ### FELTETELEK NAPPALRA ES EJSZAKARA KULON
-    if day_shift < 2 * DAYS:
-        print('ALERT!!! Nappalra kevesebb műszak van beírva, mint szükséges!')
+    if sum_day_shift_min > 2 * DAYS:
+        print('Nappalos műszakokból legalább beírandó több, mint amennyit a hónapban ki kell osztani!')
         ERROR = 1
-    elif day_shift > 2 * DAYS:
-        print('ALERT!!! Nappalra több műszak van beírva, mint szükséges!')
-        ERROR = 1
-
-    if night_shift < DAYS:
-        print('ALERT!!! Éjszakára kevesebb műszak van beírva, mint szükséges!')
-        ERROR = 1
-    elif night_shift > DAYS:
-        print('ALERT!!! Éjszakára több műszak van beírva, mint szükséges!')
+    if sum_day_shift_max < 2 * DAYS:
+        print('Nappalos műszakokból legfeljebb beírandó kevesebb, mint amennyit a hónapban ki kell osztani!')
         ERROR = 1
 
-    ### ### ELLENORZES, HOGY NEM ADTAK-E EGY EMBERNEK TOBB FIX NAPOT
-    ### ### NAPPALRA VAGY EJSZAKARA, MINT AMENNYIT LEHETNE
-    ### ### ES
-    ### ### ELLENORZES, HOGY NEM ADTAK-E VALAKINEK
-    ### ### EJSZAKA UTAN NAPPALT
-    for row in range(len(ORIG_TABLE)):
-        s = 0
-        for day in range(DAYS):
-            if ORIG_TABLE[row][day + 3] in {'n', 'N'}:
-                s += 1
-                if ORIG_TABLE[row][day + 2] in {'é', 'É'}:
-                    ERROR = 1
-                    print(ORIG_TABLE[row][0], day + 1, 'DATE: ALERT DAY AFTER NIGHT!!!')
-        if s > ORIG_TABLE[row][1]:
+    if sum_night_shift_min > DAYS:
+        print('Éjszakás műszakokból legalább beírandó több, mint amennyit a hónapban ki kell osztani!')
+        ERROR = 1
+    if sum_night_shift_max < DAYS:
+        print('Éjszakás műszakokból legfeljebb beírandó kevesebb, mint amennyit a hónapban ki kell osztani!')
+        ERROR = 1
+
+    if sum_shifts != 3 * DAYS:
+        print('Nem megfelelő az összes műszakszám kiosztása!')
+        ERROR = 1
+
+    ### ### TABLAZAT ELLENORZESE
+    for row in ORIG_TABLE:
+        day_shift = 0
+        night_shift = 0
+        possible_days = 0
+
+        ### TABLAZAT KITOLTESE LOGIKAILAG NINCS-E ELRONTVA
+        if row[1] > row[2]:
+            print(row[0], 'adminnak több minimum nappalos műszakot kell megadni, mint maximumot!')
             ERROR = 1
-            print(ORIG_TABLE[row][0], ': ALERT DAY!!!')
-
-        s = 0
-        for night in range(DAYS):
-            if ORIG_TABLE[row][night + 3] in {'é', 'É'}:
-                s += 1
-        if s > ORIG_TABLE[row][2]:
+        if row[3] > row[4]:
+            print(row[0], 'adminnak több minimum éjszakás műszakot kell megadni, mint maximumot!')
             ERROR = 1
-            print(ORIG_TABLE[row][0], ': ALERT NIGHT!!!')
+
+        for day in range(6, len(row)):
+            ### ### ELLENORZES, HOGY NEM ADTAK-E EGY EMBERNEK TOBB FIX NAPOT
+            ### ### NAPPALRA VAGY EJSZAKARA, MINT AMENNYIT LEHETNE
+            ### ### ES
+            ### ### ELLENORZES, HOGY NEM ADTAK-E VALAKINEK
+            ### ### EJSZAKA UTAN NAPPALT
+                if row[day] in {'n', 'N'}:
+                    day_shift += 1
+                    if row[day - 1] in {'e', 'E', 'é', 'É'}:
+                        print(row[0], day - 1, 'napokon éjszakás után nappalos!')
+                        ERROR = 1
+
+                if row[day] in {'e', 'E', 'é', 'É'}:
+                    night_shift += 1
+                
+                if row[day] == None:
+                    possible_days += 1
+
+        ### HIBAUZENETEK
+        if day_shift > row[2]:
+            print(row[0], 'adminnak több fix nappalos műszak lett beírva, mint amennyi maximum lehet!')
+            ERROR = 1
+
+        if night_shift > row[4]:
+            print(row[0], 'adminnak több fix éjszakás műszak lett beírva, mint amennyi maximum lehet!')
+            ERROR = 1
+
+        if possible_days < row[5]:
+            print(row[0], 'adminnak nincs annyi beosztható napja, ahány napra be kéne osztani!')
+            ERROR = 1
+                
 
     ### ### ELLENORZES, HOGY NEM OSZTOTTAK-E BE TOBB EMBERT EGY NAPON
     ### ### NAPPALRA VAGY EJSZAKARA, MINT AMENNYIT LEHETNE
-    for day in range(3, len(ORIG_TABLE[0])):
+    for day in range(6, len(ORIG_TABLE[0])):
         s_day = 0
         s_night = 0
-        for people in range(len(ORIG_TABLE)):
-            if ORIG_TABLE[people][day] in {'n', 'N'}:
+        for admin in range(len(ORIG_TABLE)):
+            if ORIG_TABLE[admin][day] in {'n', 'N'}:
                 s_day += 1
-            if ORIG_TABLE[people][day] in {'é', 'É'}:
+            if ORIG_TABLE[admin][day] in {'e', 'E', 'é', 'É'}:
                 s_night += 1
         if s_day > 2:
+            print(day - 5, 'napon több fix nappalos műszak lett beírva, mint 2!')
             ERROR = 1
-            print(day - 2, 'ALERT DAY SHIFT!!!')
         if s_night > 1:
+            print(day - 5, 'napon több fix éjszakás műszak lett beírva!')
             ERROR = 1
-            print(day - 2, 'ALERT NIGHT SHIFT!!!')
 
     if ERROR:
         return 0
@@ -260,15 +286,18 @@ def main() -> None:
             if d - 6 not in sat and d - 6 not in sun:
                 ORIG_TABLE[-1][d] = 'y'
 
-    ### ELLENORZESEK
-    ### TODO
-    # if request_check(ORIG_TABLE) == 0:
-    #     return 0
+    for i in ORIG_TABLE:
+        print(i)
 
-    # This program tries to find an optimal assignment of nurses to shifts
-    # (3 shifts per day, for 7 days), subject to some constraints (see below).
-    # Each nurse can request to be assigned to specific shifts.
-    # The optimal assignment maximizes the number of fulfilled shift requests.
+    ### ELLENORZESEK
+    ### TODO : CHECK!
+    if request_check(ORIG_TABLE) == 0:
+        return 0
+    else:
+        print('Check OK!')
+        return 1
+
+    # CP-SAT Solver
     num_admins = len(admins_name)
     num_shifts = 2
     all_admins = range(num_admins)
@@ -287,6 +316,7 @@ def main() -> None:
             for s in all_shifts:
                 shifts[(a, d, s)] = model.NewBoolVar(f"shift_a{a}_d{d}_s{s}")
 
+    # Constrains
     # Every day shifts has exactly 2 nurses and night shifts exactly 1
     for d in all_days:
         model.Add(sum([shifts[(a, d, 0)] for a in all_admins]) == 2)
@@ -316,9 +346,7 @@ def main() -> None:
         for d in range(num_days - 3):
             model.Add(shifts[(a, d + 3, 1)] == 0).OnlyEnforceIf([shifts[(a, d, 0)], shifts[(a, d + 1, 0)], shifts[(a, d + 2, 1)]])
 
-    # Set day and night shift nums
-    ### Soft constrains
-    # Day and night shifts min, max and sum constrains
+    # Day and night shifts min, max and sum soft constrains
     for a in all_admins:
         model.Add(sum( [shifts[(a, d, 0)] for d in all_days] ) >= day_shifts_min[a])
         model.Add(sum( [shifts[(a, d, 0)] for d in all_days] ) <= day_shifts_max[a])
@@ -336,96 +364,59 @@ def main() -> None:
                 else:
                     model.Add(shifts[(a, d, s)] == 1)
 
-    # for a in all_admins:
-    #     for d in all_days:
-    #         for s in all_shifts:
-    #             if shift_requests[a][d][s] == 0:
-    #                 model.Add(shifts[(a, d, s)] == 0)
-
-
-    # model.Maximize(1)
-    # model.Maximize(
-    #         sum(
-    #             shift_requests[n][d][s] * shifts[(n, d, s)]
-    #             for n in all_nurses
-    #             for d in all_days
-    #             for s in all_shifts
-    #             )
-    #         )
-
+    # Eredmenynek a tablzat
     fin_table = [[i for _ in range(num_days + 1)] for i in range(num_admins)]
 
+    if solution_limit < 1:
+        print('Nem kertel megoldast!')
+    elif solution_limit == 1:
+        # TODO
+        # model.Maximize(
+        #         sum(
+        #             shift_requests[n][d][s] * shifts[(n, d, s)]
+        #             for n in all_nurses
+        #             for d in all_days
+        #             for s in all_shifts
+        #             )
+        #         )
+        model.Maximize(1)
+        
+        # Creates the solver and solve.
+        solver = cp_model.CpSolver()
+        status = solver.Solve(model)
+        
+        if status == cp_model.OPTIMAL:
+            for a in range(num_admins):
+                sd = 0
+                sn = 0
+                for d in range(num_days):
+                    if solver.Value(shifts[(a, d, 0)]) == 1:
+                        fin_table[a][d + 1] = 'N'
+                        sd += 1
+                    elif solver.Value(shifts[(a, d, 1)]) == 1:
+                        fin_table[a][d + 1] = 'E'
+                        sn += 1
+                    else:
+                        fin_table[a][d + 1] = ' '
+                # fin_table[a].append(sd)
+                # fin_table[a].append(sn)
+        else:
+            print("No optimal solution found !")
 
-    solver = cp_model.CpSolver()
-    solution_printer = SolutionPrinter(shifts, all_admins, num_days, all_shifts, solution_limit)
+        for i in fin_table:
+            print(i)
 
-    solver.parameters.enumerate_all_solutions = True
-    # Solve.
-    status = solver.SearchForAllSolutions(model, solution_printer)
-
-    print(f"Status = {solver.StatusName(status)}")
-    print(f"Number of solutions found: {solution_printer.solution_count}")
-
-
-    return 0
-
-    # OLD!!!
-    # Creates the solver and solve.
-    solver = cp_model.CpSolver()
-    status = solver.Solve(model)
-    
-    if status == cp_model.OPTIMAL:
-        for a in range(num_admins):
-            sd = 0
-            sn = 0
-            for d in range(num_days):
-                if solver.Value(shifts[(a, d, 0)]) == 1:
-                    fin_table[a][d + 1] = 'N'
-                    sd += 1
-                elif solver.Value(shifts[(a, d, 1)]) == 1:
-                    fin_table[a][d + 1] = 'E'
-                    sn += 1
-                else:
-                    fin_table[a][d + 1] = ' '
-            fin_table[a].append(sd)
-            fin_table[a].append(sn)
     else:
-        print("No optimal solution found !")
+        solver = cp_model.CpSolver()
+        solution_printer = SolutionPrinter(shifts, all_admins, num_days, all_shifts, solution_limit)
 
-    for i in fin_table:
-        print(i)
+        solver.parameters.enumerate_all_solutions = True
+        # Solve.
+        status = solver.SearchForAllSolutions(model, solution_printer)
 
-    for i in fin_table:
-        for j in range(len(i) - 1):
-            if i[j] == 'E' and i[j + 1] == 'N':
-                print('BAJ')
+        print(f"Status = {solver.StatusName(status)}")
+        print(f"Number of solutions found: {solution_printer.solution_count}")
 
-    return 0
-
-    if status == cp_model.OPTIMAL:
-        print("Solution:")
-        for d in all_days:
-            print("Day", d)
-            for a in all_admins:
-                for s in all_shifts:
-                    if solver.Value(shifts[(a, d, s)]) == 1:
-                        if shift_requests[a][d][s] == 1:
-                            print("Nurse", a, "works shift", s, "(requested).")
-                        else:
-                            print("Nurse", a, "works shift", s, "(not requested).")
-            print()
-        print(
-            f"Number of shift requests met = {solver.ObjectiveValue}",
-            f"(out of {num_nurses * min_shifts_per_nurse})",
-        )
-    else:
-        print("No optimal solution found !")
-
-    # Statistics.
-    print("\nStatistics")
-    print(f"  - conflicts: {solver.NumConflicts}")
-    print(f"  - branches : {solver.NumBranches}")
-    print(f"  - wall time: {solver.WallTime}s")
 
 
 if __name__ == "__main__":

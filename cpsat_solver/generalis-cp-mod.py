@@ -41,6 +41,7 @@ def niceprint(final_table, DAYS, SWITCH):
                         print(' ', end='  ')
             print()
 
+
 def request_check(ORIG_TABLE):
     DAYS = len(ORIG_TABLE[0]) - 6
     ERROR = 0
@@ -142,9 +143,14 @@ def request_check(ORIG_TABLE):
 
 class SolutionPrinter(cp_model.CpSolverSolutionCallback):
     """Megoldás visszahívó osztály, amely kiírja a talált megoldásokat."""
+    out_workbook = Workbook()
+    out_sheet = out_workbook.active
+    schedules = out_sheet.title
+    act_row = -1
 
-    def __init__(self, shifts, all_admins, num_days, all_shifts, solution_limit=None):
+    def __init__(self, admins_name, shifts, all_admins, num_days, all_shifts, solution_limit=None):
         cp_model.CpSolverSolutionCallback.__init__(self)
+        self._admins_name = admins_name
         self._shifts = shifts
         self._all_admins = all_admins
         self._num_days = num_days
@@ -159,8 +165,9 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         print(f"\n--- Megoldás {self._solution_count} ---")
         current_schedule = []
 
+        SolutionPrinter.act_row += 2
         for a in self._all_admins:
-            admins_shifts_today = [a]
+            admins_shifts_today = [self._admins_name[a]]
             for d in range(self._num_days):
                 OK = 0
                 for s in self._all_shifts:
@@ -173,8 +180,15 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
                             OK= 1
                 if not OK:
                     admins_shifts_today.append(' ')
+            act_col = 1
+            for i in admins_shifts_today:
+                cell = SolutionPrinter.out_sheet.cell(row = SolutionPrinter.act_row, column = act_col)
+                cell.value = i
+                act_col += 1
+            SolutionPrinter.act_row += 1
             print(admins_shifts_today)
         print()
+        SolutionPrinter.out_workbook.save('./admin_schedule.xlsx')
 
         self.all_found_schedules.append(current_schedule)
 
@@ -295,7 +309,7 @@ def main() -> None:
         return 0
     else:
         print('Check OK!')
-        return 1
+
 
     # CP-SAT Solver
     num_admins = len(admins_name)
@@ -369,17 +383,49 @@ def main() -> None:
 
     if solution_limit < 1:
         print('Nem kertel megoldast!')
+        
     elif solution_limit == 1:
-        # TODO
-        # model.Maximize(
-        #         sum(
-        #             shift_requests[n][d][s] * shifts[(n, d, s)]
-        #             for n in all_nurses
-        #             for d in all_days
-        #             for s in all_shifts
-        #             )
-        #         )
-        model.Maximize(1)
+        # Segédváltozók a szabadnapok azonosítására
+        # is_free_day[(n, d)]: igaz, ha a nővér 'n' a 'd' napon pihen
+        is_free_day = {}
+        for a in all_admins:
+            for d in all_days:
+                is_free_day[(a, d)] = model.NewBoolVar(f'is_free_day_a{a}_d{d}')
+                # is_free_day[(a,d)] igaz, ha shifts[(a,d,0)] HAMIS ÉS shifts[(a,d,1)] HAMIS
+                model.AddBoolAnd([shifts[(a, d, 0)].Not(), shifts[(a, d, 1)].Not()]).OnlyEnforceIf(is_free_day[(a, d)])
+
+        # Segédváltozók a dupla szabadnapok azonosítására
+        # is_double_free[(n, d)]: igaz, ha a nővér 'n' a 'd' napon ÉS a 'd+1' napon pihen
+        is_double_free = {}
+        for a in all_admins:
+            for d in range(num_days - 1): # Az utolsó napra nem kell ellenőrizni, mert nincs d+1
+                is_double_free[(a, d)] = model.NewBoolVar(f'is_double_free_a{a}_d{d}')
+                # is_double_free[(a,d)] igaz, ha is_free_day[(a,d)] IGAZ ÉS is_free_day[(a,d+1)] IGAZ
+                model.AddBoolAnd([is_free_day[(a, d)], is_free_day[(a, d + 1)]]).OnlyEnforceIf(is_double_free[(a, d)])
+
+        # Segédváltozók a tripla szabadnapok azonosítására
+        # is_triple_free[(a, d)]: igaz, ha a nővér 'a' a 'd' napon, 'd+1' napon ÉS 'd+2' napon pihen
+        # is_triple_free = {}
+        # for a in all_admins:
+        #     for d in range(num_days - 2): # Az utolsó két napra nem kell ellenőrizni
+        #         is_triple_free[(a, d)] = model.NewBoolVar(f'is_triple_free_a{a}_d{d}')
+        #         # is_triple_free[(a,d)] igaz, ha is_free_day[(a,d)] IGAZ, is_free_day[(a,d+1)] IGAZ ÉS is_free_day[(a,d+2)] IGAZ
+        #         model.AddBoolAnd([is_free_day[(a, d)], is_free_day[(a, d + 1)], is_free_day[(a, d + 2)]]).OnlyEnforceIf(is_triple_free[(a, d)])
+
+        # Súlyok a célfüggvényhez
+        double_free_weight = 8
+        triple_free_weight = 6
+
+        # Célfüggvény felépítése
+        objective_terms = []
+        for a in all_admins:
+            for d in range(num_days - 1): # Dupla szabadnapokhoz
+                objective_terms.append(is_double_free[(a, d)] * double_free_weight)
+            # for d in range(num_days - 2): # Tripla szabadnapokhoz
+            #     objective_terms.append(is_triple_free[(a, d)] * triple_free_weight)
+
+        # Maximalizáljuk a szabadnapok súlyozott összegét
+        model.Maximize(sum(objective_terms))
         
         # Creates the solver and solve.
         solver = cp_model.CpSolver()
@@ -402,20 +448,44 @@ def main() -> None:
                 # fin_table[a].append(sn)
         else:
             print("No optimal solution found !")
+            model.Maximize(1)
+            
+            # Creates the solver and solve.
+            solver = cp_model.CpSolver()
+            status = solver.Solve(model)
+            
+            if status == cp_model.OPTIMAL:
+                for a in range(num_admins):
+                    sd = 0
+                    sn = 0
+                    for d in range(num_days):
+                        if solver.Value(shifts[(a, d, 0)]) == 1:
+                            fin_table[a][d + 1] = 'N'
+                            sd += 1
+                        elif solver.Value(shifts[(a, d, 1)]) == 1:
+                            fin_table[a][d + 1] = 'E'
+                            sn += 1
+                        else:
+                            fin_table[a][d + 1] = ' '
+                    # fin_table[a].append(sd)
+                    # fin_table[a].append(sn)
+            else:
+                print('No solution found!')
+                return 0
 
         for i in fin_table:
             print(i)
 
     else:
         solver = cp_model.CpSolver()
-        solution_printer = SolutionPrinter(shifts, all_admins, num_days, all_shifts, solution_limit)
+        solution_printer = SolutionPrinter(admins_name, shifts, all_admins, num_days, all_shifts, solution_limit)
 
         solver.parameters.enumerate_all_solutions = True
         # Solve.
         status = solver.SearchForAllSolutions(model, solution_printer)
 
-        print(f"Status = {solver.StatusName(status)}")
-        print(f"Number of solutions found: {solution_printer.solution_count}")
+        # print(f"Status = {solver.StatusName(status)}")
+        # print(f"Number of solutions found: {solution_printer.solution_count}")
 
 
 

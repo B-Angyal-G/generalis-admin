@@ -432,13 +432,15 @@ def main() -> None:
                 else:
                     model.Add(shifts[(a, d, s)] == 1)
 
-    # EREDMENYNEK A TABLZAT
-    fin_table = [[i for _ in range(num_days + 1)] for i in range(num_admins)]
-
     if solution_limit < 1:
         print('Nem kertel megoldast!')
         
     elif solution_limit == 1:
+        # EREDMENYNEK A TABLZAT
+        fin_table = [[i for _ in range(num_days + 1)] for i in range(num_admins)]
+        for a in range(len(fin_table)):
+            fin_table[a][0] = admins_name[a]
+
         # SEGEDVALTOZOK A SZABADNAPOK AZONOSITASARA
         # is_free_day[(a, d)]: IGAZ, HA 'a' ADMIN A 'd' NAPON PIHEN
         is_free_day = {}
@@ -527,8 +529,28 @@ def main() -> None:
                 print('No solution found!')
                 return 0
 
+        # EREDMENY ELMENTESE
+        out_workbook = Workbook()
+        out_sheet = out_workbook.active
+        schedule = out_sheet.title
+        act_row = 1
+
+        for a in range(len(fin_table)):
+            for d in range(len(fin_table[a])):
+                cell = out_sheet.cell(row = a + 1, column = d + 1)
+                cell.value = fin_table[a][d]
+
+        rating = eval_table(fin_table, sat_orig, sun_orig)
+        cell = out_sheet.cell(row = len(fin_table) + 1, column = 1)
+        cell.value = 'Értékelés:'
+        cell = out_sheet.cell(row = len(fin_table) + 1, column = 2)
+        cell.value = rating
+
+        out_workbook.save('./admin_schedule_opt.xlsx')
+
         for i in fin_table:
             print(i)
+        print(rating)
 
     else:
         solver = cp_model.CpSolver()
@@ -537,9 +559,6 @@ def main() -> None:
         solver.parameters.enumerate_all_solutions = True
         # MEGOLDAS
         status = solver.SearchForAllSolutions(model, solution_printer)
-
-        # print(f"Status = {solver.StatusName(status)}")
-        # print(f"Number of solutions found: {solution_printer.solution_count}")
 
 
 
@@ -551,11 +570,11 @@ if __name__ == "__main__":
     file_tmp = folder + '/admin_schedule_tmp.xlsx'
     file_orig = folder + '/admin_schedule.xlsx'
     
-    if os.path.exists(file_orig):
+    if os.path.exists(file_tmp) and os.path.exists(file_orig):
         if os.path.getsize(file_tmp) > os.path.getsize(file_orig):
             os.remove(file_orig)
             os.rename(file_tmp, file_orig)
         else:
             os.remove(file_tmp)
-    else:
+    elif os.path.exists(file_tmp):
         os.rename(file_tmp, file_orig)

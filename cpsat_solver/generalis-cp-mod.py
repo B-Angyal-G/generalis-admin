@@ -1,45 +1,7 @@
 from ortools.sat.python import cp_model
+import copy as c
+import os
 from openpyxl import *
-
-
-def niceprint(final_table, DAYS, SWITCH):
-    if SWITCH == 0:
-        print('NÉV'.center(21, ' '), end='\t ')
-        for i in range(DAYS):
-            if i < 9:
-                print(i + 1, end='  ')
-            else:
-                print(i + 1, end=' ')
-        print()
-        for i in final_table:
-            for j in range(len(i)):
-                if j == 0:
-                    print(i[j].ljust(21, ' '), end='\t|')
-                else:
-                    if i[j] != 0:
-                        print(i[j], end='  ')
-                    else:
-                        print(' ', end='  ')
-            print()
-
-    elif SWITCH == 1:
-        print('NÉV'.center(21, ' '), end='\t       ')
-        for i in range(DAYS):
-            if i < 9:
-                print(i + 1, end='  ')
-            else:
-                print(i + 1, end=' ')
-        print()
-        for i in final_table:
-            for j in range(len(i)):
-                if j == 0:
-                    print(i[j].ljust(21, ' '), end='\t|')
-                else:
-                    if i[j] != 0:
-                        print(i[j], end='  ')
-                    else:
-                        print(' ', end='  ')
-            print()
 
 
 def request_check(ORIG_TABLE):
@@ -142,30 +104,33 @@ def request_check(ORIG_TABLE):
 
 
 class SolutionPrinter(cp_model.CpSolverSolutionCallback):
-    """Megoldás visszahívó osztály, amely kiírja a talált megoldásokat."""
+    ### MEGOLDAS VISSZAHIVO OSZTALY, AMELY KIIRJA A TALALT MEGOLDASOKAT
     out_workbook = Workbook()
     out_sheet = out_workbook.active
     schedules = out_sheet.title
     act_row = -1
 
-    def __init__(self, admins_name, shifts, all_admins, num_days, all_shifts, solution_limit=None):
+    def __init__(self, admins_name, shifts, all_admins, num_days, all_shifts, sat_orig, sun_orig, solution_limit=None):
         cp_model.CpSolverSolutionCallback.__init__(self)
         self._admins_name = admins_name
         self._shifts = shifts
         self._all_admins = all_admins
         self._num_days = num_days
         self._all_shifts = all_shifts
+        self._sat_orig = sat_orig
+        self._sun_orig = sun_orig
         self._solution_count = 0
         self._solution_limit = solution_limit
-        self.all_found_schedules = [] # Itt tároljuk az összes talált beosztást
+        self.all_found_schedules = [] # ITT TAROLJUK AZ OSSZES TALALT MEGOLDAST
 
     def OnSolutionCallback(self):
-        """Ezt a metódust hívja meg a solver minden talált megoldáskor."""
+        ### EZT A METODUST HIVJA MEG A SOLVER MINDEN TALALT MEGOLDASKOR
         self._solution_count += 1
         print(f"\n--- Megoldás {self._solution_count} ---")
         current_schedule = []
 
         SolutionPrinter.act_row += 2
+        table_fin = list()
         for a in self._all_admins:
             admins_shifts_today = [self._admins_name[a]]
             for d in range(self._num_days):
@@ -186,13 +151,20 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
                 cell.value = i
                 act_col += 1
             SolutionPrinter.act_row += 1
+            table_fin.append(admins_shifts_today)
             print(admins_shifts_today)
+        rating = eval_table(table_fin, self._sat_orig, self._sun_orig)
+        cell = SolutionPrinter.out_sheet.cell(row = SolutionPrinter.act_row, column = 1)
+        cell.value = 'Értékelés:'
+        cell = SolutionPrinter.out_sheet.cell(row = SolutionPrinter.act_row, column = 2)
+        cell.value = rating
+        print(rating)
         print()
-        SolutionPrinter.out_workbook.save('./admin_schedule.xlsx')
+        SolutionPrinter.out_workbook.save('./admin_schedule_tmp.xlsx')
 
         self.all_found_schedules.append(current_schedule)
 
-        # Ha be van állítva megoldás limit, és elértük, állítsuk le a keresést
+        # HA BE VAN ALLITVA MEGOLDAS LIMIT, ES ELERTUK, AKKOR ALLITSUK LE A KERESEST
         if self._solution_limit is not None and self._solution_count >= self._solution_limit:
             print(f"Elértük a {self._solution_limit} megoldás limitet. Leállítás.")
             self.StopSearch()
@@ -237,6 +209,88 @@ def read_requests(ORIG_TABLE, all_admins, all_days, all_shifts):
                     shift_requests[a][d - 1][1] = 0
 
     return shift_requests
+
+
+def pattern_count(row, pattern):
+    row_tmp = c.deepcopy(row)
+    row_tmp = row_tmp.replace('N', '*')
+    row_tmp = row_tmp.replace('E', '*')
+    l = len(pattern)
+
+    s = 0
+    current = ''
+    for i in range(l):
+        current += row_tmp[1 + i]
+    if current == pattern:
+        s += 1
+
+    for i in range(1 + l, len(row_tmp)):
+        current = current[1:]
+        current += row_tmp[i]
+        if current == pattern:
+            s += 1
+    return s
+
+
+def eval_table(table_fin, sat_orig, sun_orig):
+    PRINT = 0
+
+    VALUE = 10000
+    pattern = [['.**.', 35], ['.***.', 170], ['.**.*.', 40], ['.**.**.', 80], ['.***..**.', 115]]
+
+    ### MINDEN EGYES ADMINHOZ TARTOZIK EGY KETELEMU LISTA,
+    ### MELYNEK AZ ELSO ELEME AZ OSSZES MUSZAKJA, A MASODIK A HETVEGERE ESO MUSZAKJAI
+    admin_shifts = [ [0, 0] for i in range(len(table_fin)) ]
+
+    table_string = ['.' for i in range(len(table_fin))]
+    for admin in range(len(table_fin)):
+        s = 0
+        w = 0
+        for day in range(1, len(table_fin[0])):
+            if table_fin[admin][day] == ' ':
+                table_string[admin] += '.'
+            elif table_fin[admin][day] in {'N', 'E'}:
+                s += 1
+                table_string[admin] += table_fin[admin][day]
+                if day in sat_orig or day in sun_orig:
+                    w += 1
+        admin_shifts[admin][0] = s
+        admin_shifts[admin][1] = w
+        table_string[admin] += '.'
+
+    weekend = 0
+    weekend += len(sat_orig)
+    weekend += len(sun_orig)
+    weekend *= 3
+    sum_shifts = 3 * (len(table_fin[0]) - 1)
+    for admin in admin_shifts:
+        opt_weekend = admin[0]*weekend/sum_shifts
+        w = abs(admin[1] - opt_weekend)
+        if w > 2:
+            VALUE -= 120
+        elif w > 1:
+            VALUE -= 50
+        elif w > 0:
+            VALUE -= 20
+
+    for row in table_string:
+        for p in pattern:
+            VALUE -= pattern_count(row, p[0])*p[1]
+
+    if PRINT:
+        for i in table_fin:
+            print(i)
+        print()
+        print(VALUE)
+        print()
+        for i in admin_shifts:
+            print(i)
+        print()
+        print('-'*100)
+        print()
+
+    return VALUE
+
 
 def main() -> None:
     ### XLSX IMPORTALASA
@@ -311,7 +365,7 @@ def main() -> None:
         print('Check OK!')
 
 
-    # CP-SAT Solver
+    # CP-SAT SOLVER
     num_admins = len(admins_name)
     num_shifts = 2
     all_admins = range(num_admins)
@@ -319,19 +373,19 @@ def main() -> None:
     all_days = range(num_days)
     shift_requests = read_requests([row[6:] for row in ORIG_TABLE], all_admins, all_days, all_shifts)
 
-    # Creates the model.
+    # MODEL LETREHOZASA
     model = cp_model.CpModel()
 
-    # Creates shift variables.
-    # shifts[(n, d, s)]: nurse 'n' works shift 's' on day 'd'.
+    # MUSZAK VALTOZOK LETREHOZASA
+    # shifts[(a, d, s)]: a ADMIN, d NAPON, s MUSZAKBAN DOLGOZIK-E
     shifts = {}
     for a in all_admins:
         for d in all_days:
             for s in all_shifts:
                 shifts[(a, d, s)] = model.NewBoolVar(f"shift_a{a}_d{d}_s{s}")
 
-    # Constrains
-    # Every day shifts has exactly 2 nurses and night shifts exactly 1
+    # MEGKOTESEK
+    # MINDEN NAP PONTOSAN 2 NAPPALOS MUSZAK ES 1 EJSZAKAS MUSZAKBAN DOLGOZO ADMIN VAN
     for d in all_days:
         model.Add(sum([shifts[(a, d, 0)] for a in all_admins]) == 2)
 
@@ -339,28 +393,28 @@ def main() -> None:
         model.AddExactlyOne([shifts[(a, d, 1)] for a in all_admins])
 
 
-    # Each nurse works at most one shift per day.
+    # MINDEN ADMIN EGY NAP EGY MUSZAKBAN DOLGOZHAT
     for a in all_admins:
         for d in all_days:
             model.AddAtMostOne([shifts[(a, d, s)] for s in all_shifts])
 
-    # Never work at day after night shift.
+    # EJSZAKAS UTAN NEM LEHET NAPPAL DOLGOZNI
     for a in all_admins:
         for d in range(num_days - 1):
             model.Add(shifts[(a, d + 1, 0)] == 0).OnlyEnforceIf(shifts[(a, d, 1)])
 
-    # No 3 similar shifts in a row
+    # NEM LEHET ZSINORBAN 3-SZOR UGYANABBAN A MUSZAKBAN DOLGOZNI
     for a in all_admins:
         for d in range(num_days - 2):
             model.Add(shifts[(a, d + 2, 0)] == 0).OnlyEnforceIf([shifts[(a, d, 0)], shifts[(a, d + 1, 0)]])
             model.Add(shifts[(a, d + 2, 1)] == 0).OnlyEnforceIf([shifts[(a, d, 1)], shifts[(a, d + 1, 1)]])
 
-    # No 4 shifts in a row
+    # NEM LEHET 4 MUSZAKOT FOLYAMATOSAN DOLGOZNI (ELOZO SZABALY MIATT EGYEDUL NNEE MODON VALOSULHATNA MEG)
     for a in all_admins:
         for d in range(num_days - 3):
             model.Add(shifts[(a, d + 3, 1)] == 0).OnlyEnforceIf([shifts[(a, d, 0)], shifts[(a, d + 1, 0)], shifts[(a, d + 2, 1)]])
 
-    # Day and night shifts min, max and sum soft constrains
+    # TABLAZATBAN SZEREPELNEK A NAPPALOS ES EJSZAKAS MUSZAKOK MINIMUM ES MAXIMUM ERTEKEI
     for a in all_admins:
         model.Add(sum( [shifts[(a, d, 0)] for d in all_days] ) >= day_shifts_min[a])
         model.Add(sum( [shifts[(a, d, 0)] for d in all_days] ) <= day_shifts_max[a])
@@ -369,7 +423,7 @@ def main() -> None:
         model.Add(sum( [shifts[(a, d, s)] for d in all_days for s in all_shifts] ) == shifts_sum[a])
 
     
-    # Requests
+    # KERESEK A TABLAZATBOL
     for a in all_admins:
         for d in all_days:
             for s in all_shifts:
@@ -378,15 +432,15 @@ def main() -> None:
                 else:
                     model.Add(shifts[(a, d, s)] == 1)
 
-    # Eredmenynek a tablzat
+    # EREDMENYNEK A TABLZAT
     fin_table = [[i for _ in range(num_days + 1)] for i in range(num_admins)]
 
     if solution_limit < 1:
         print('Nem kertel megoldast!')
         
     elif solution_limit == 1:
-        # Segédváltozók a szabadnapok azonosítására
-        # is_free_day[(n, d)]: igaz, ha a nővér 'n' a 'd' napon pihen
+        # SEGEDVALTOZOK A SZABADNAPOK AZONOSITASARA
+        # is_free_day[(a, d)]: IGAZ, HA 'a' ADMIN A 'd' NAPON PIHEN
         is_free_day = {}
         for a in all_admins:
             for d in all_days:
@@ -394,40 +448,40 @@ def main() -> None:
                 # is_free_day[(a,d)] igaz, ha shifts[(a,d,0)] HAMIS ÉS shifts[(a,d,1)] HAMIS
                 model.AddBoolAnd([shifts[(a, d, 0)].Not(), shifts[(a, d, 1)].Not()]).OnlyEnforceIf(is_free_day[(a, d)])
 
-        # Segédváltozók a dupla szabadnapok azonosítására
-        # is_double_free[(n, d)]: igaz, ha a nővér 'n' a 'd' napon ÉS a 'd+1' napon pihen
+        # SEGEDVALTOZOK A DUPLA SZABADNAPOK AZONOSITASARA
+        # is_double_free[(n, d)]: IGAZ, HA 'a' ADMIN A 'd' NAPON ÉS A 'd+1' NAPON PIHEN
         is_double_free = {}
         for a in all_admins:
-            for d in range(num_days - 1): # Az utolsó napra nem kell ellenőrizni, mert nincs d+1
+            for d in range(num_days - 1): # AZ UTOLSO NAPRA NEM KELL ELLENORIZNI, MERT NINCS d+1
                 is_double_free[(a, d)] = model.NewBoolVar(f'is_double_free_a{a}_d{d}')
                 # is_double_free[(a,d)] igaz, ha is_free_day[(a,d)] IGAZ ÉS is_free_day[(a,d+1)] IGAZ
                 model.AddBoolAnd([is_free_day[(a, d)], is_free_day[(a, d + 1)]]).OnlyEnforceIf(is_double_free[(a, d)])
 
-        # Segédváltozók a tripla szabadnapok azonosítására
-        # is_triple_free[(a, d)]: igaz, ha a nővér 'a' a 'd' napon, 'd+1' napon ÉS 'd+2' napon pihen
+        # SEGEDVALTOZOK A TRIPLA SZABADNAPOK AZONOSITASARA
+        # is_triple_free[(a, d)]: IGAZ, HA 'a' ADMIN A 'd' NAPON, 'd+1' NAPON ÉS 'd+2' NAPON PIHEN
         # is_triple_free = {}
         # for a in all_admins:
-        #     for d in range(num_days - 2): # Az utolsó két napra nem kell ellenőrizni
+        #     for d in range(num_days - 2): # AZ UTOLSO KET NAPRA NEM KELL ELLENORIZNI
         #         is_triple_free[(a, d)] = model.NewBoolVar(f'is_triple_free_a{a}_d{d}')
         #         # is_triple_free[(a,d)] igaz, ha is_free_day[(a,d)] IGAZ, is_free_day[(a,d+1)] IGAZ ÉS is_free_day[(a,d+2)] IGAZ
         #         model.AddBoolAnd([is_free_day[(a, d)], is_free_day[(a, d + 1)], is_free_day[(a, d + 2)]]).OnlyEnforceIf(is_triple_free[(a, d)])
 
-        # Súlyok a célfüggvényhez
+        # SULYOK A CELFUGGVENYHEZ
         double_free_weight = 8
         triple_free_weight = 6
 
-        # Célfüggvény felépítése
+        # CELFUGGVENY FELEPITESE
         objective_terms = []
         for a in all_admins:
-            for d in range(num_days - 1): # Dupla szabadnapokhoz
+            for d in range(num_days - 1): # DUPLA SZABADNAPOKHOZ
                 objective_terms.append(is_double_free[(a, d)] * double_free_weight)
-            # for d in range(num_days - 2): # Tripla szabadnapokhoz
+            # for d in range(num_days - 2): # TRIPLA SZABADNAPOKHOZ
             #     objective_terms.append(is_triple_free[(a, d)] * triple_free_weight)
 
-        # Maximalizáljuk a szabadnapok súlyozott összegét
+        # MAXIMALIZALJUK A SZABADNAPOK SULYOZOTT OSSZEGET
         model.Maximize(sum(objective_terms))
         
-        # Creates the solver and solve.
+        # SOLVER LETREHOZASA ES MEGOLDAS
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
         
@@ -450,7 +504,7 @@ def main() -> None:
             print("No optimal solution found !")
             model.Maximize(1)
             
-            # Creates the solver and solve.
+            # SOLVER LETREHOZASA ES MEGOLDAS
             solver = cp_model.CpSolver()
             status = solver.Solve(model)
             
@@ -478,10 +532,10 @@ def main() -> None:
 
     else:
         solver = cp_model.CpSolver()
-        solution_printer = SolutionPrinter(admins_name, shifts, all_admins, num_days, all_shifts, solution_limit)
+        solution_printer = SolutionPrinter(admins_name, shifts, all_admins, num_days, all_shifts, sat_orig, sun_orig, solution_limit)
 
         solver.parameters.enumerate_all_solutions = True
-        # Solve.
+        # MEGOLDAS
         status = solver.SearchForAllSolutions(model, solution_printer)
 
         # print(f"Status = {solver.StatusName(status)}")
@@ -491,3 +545,17 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+    ### NAGYOBB ELEMSZAMU FILE MEGTARTASA
+    folder = '/home/angyal/dat/prog/python/generalis-admin/cpsat_solver'
+    file_tmp = folder + '/admin_schedule_tmp.xlsx'
+    file_orig = folder + '/admin_schedule.xlsx'
+    
+    if os.path.exists(file_orig):
+        if os.path.getsize(file_tmp) > os.path.getsize(file_orig):
+            os.remove(file_orig)
+            os.rename(file_tmp, file_orig)
+        else:
+            os.remove(file_tmp)
+    else:
+        os.rename(file_tmp, file_orig)
